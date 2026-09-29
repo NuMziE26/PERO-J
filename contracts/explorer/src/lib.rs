@@ -183,13 +183,13 @@ impl ExplorerContract {
         }
     }
 
-    /// Read the next event sequence number from instance storage.
+    /// Read the next event sequence number from persistent storage.
     ///
     /// Panics with `NotInitialized` if the counter is missing, which means
     /// `init` has not been called yet.
     fn event_seq(env: &Env) -> u64 {
         env.storage()
-            .instance()
+            .persistent()
             .get(&DataKey::EventSeq)
             .unwrap_or_else(|| panic_with_error!(env, Error::NotInitialized))
     }
@@ -227,7 +227,10 @@ impl ExplorerContract {
             panic_with_error!(&env, Error::AlreadyExists);
         }
         env.storage().persistent().set(&DataKey::Admin, &admin);
-        env.storage().instance().set(&DataKey::EventSeq, &0u64);
+        env.storage().persistent().set(&DataKey::EventSeq, &0u64);
+        env.storage().persistent().extend_ttl(
+            &DataKey::EventSeq, EVENTSEQ_TTL_THRESHOLD, EVENTSEQ_TTL_BUMP,
+        );
         Self::bump_ttl(&env);
     }
 
@@ -491,7 +494,7 @@ impl ExplorerContract {
         if limit > MAX_PAGE {
             panic_with_error!(&env, Error::LimitExceeded);
         }
-        let total: u64 = env.storage().instance().get(&DataKey::EventSeq).unwrap_or(0);
+        let total: u64 = env.storage().persistent().get(&DataKey::EventSeq).unwrap_or(0);
         let mut out: Vec<DecodedEvent> = Vec::new(&env);
         let end = from.saturating_add(limit as u64).min(total);
         for seq in from..end {
@@ -908,6 +911,43 @@ mod tests {
         assert!(ttl >= TTL_THRESHOLD, "instance ttl {} not bumped", ttl);
     }
 
+    #[test]
+    fn test_event_seq_survives_instance_ttl_expiry() {
+        let (env, client) = setup!();
+        let admin = Address::generate(&env);
+        client.init(&admin);
+
+        let cid: BytesN<32> = BytesN::from_array(&env, &[14u8; 32]);
+        client.submit_event(
+            &admin,
+            &cid,
+            &symbol_short!("swap"),
+            &1u32,
+            &String::from_str(&env, "first event"),
+            &Vec::new(&env),
+            &Bytes::new(&env),
+        );
+
+        // Model the instance entry expiring while the persistent counter remains.
+        env.as_contract(&client.address, || {
+            env.storage().instance().remove(&DataKey::EventSeq);
+        });
+
+        client.submit_event(
+            &admin,
+            &cid,
+            &symbol_short!("swap"),
+            &2u32,
+            &String::from_str(&env, "second event"),
+            &Vec::new(&env),
+            &Bytes::new(&env),
+        );
+
+        assert_eq!(client.event_count(), 2u64);
+        assert_eq!(client.get_event(&0u64).seq, 0u64);
+        assert_eq!(client.get_event(&1u64).seq, 1u64);
+    }
+
     // ── #2 — indexer allowlist ───────────────────────────────────────────────
 
     #[test]
@@ -984,6 +1024,67 @@ mod tests {
         let admin = Address::generate(&env);
         client.init(&admin);
         assert_eq!(client.get_events(&0u64, &MAX_PAGE).len(), 0);
+    }
+
+    #[test]
+    fn test_get_events_limit_zero_returns_empty() {
+        let (env, client) = setup!();
+        let admin = Address::generate(&env);
+        client.init(&admin);
+        let cid: BytesN<32> = BytesN::from_array(&env, &[15u8; 32]);
+        client.submit_event(
+            &admin,
+            &cid,
+            &symbol_short!("swap"),
+            &1u32,
+            &String::from_str(&env, "event"),
+            &Vec::new(&env),
+            &Bytes::new(&env),
+        );
+
+        assert_eq!(client.get_events(&0u64, &0u32).len(), 0);
+    }
+
+    #[test]
+    fn test_get_events_from_equals_total_returns_empty() {
+        let (env, client) = setup!();
+        let admin = Address::generate(&env);
+        client.init(&admin);
+        let cid: BytesN<32> = BytesN::from_array(&env, &[16u8; 32]);
+        client.submit_event(
+            &admin,
+            &cid,
+            &symbol_short!("swap"),
+            &1u32,
+            &String::from_str(&env, "event"),
+            &Vec::new(&env),
+            &Bytes::new(&env),
+        );
+
+        assert_eq!(client.get_events(&1u64, &MAX_PAGE).len(), 0);
+    }
+
+    #[test]
+    fn test_get_events_from_last_returns_one() {
+        let (env, client) = setup!();
+        let admin = Address::generate(&env);
+        client.init(&admin);
+        let cid: BytesN<32> = BytesN::from_array(&env, &[17u8; 32]);
+        for ledger in 1..=2 {
+            client.submit_event(
+                &admin,
+                &cid,
+                &symbol_short!("swap"),
+                &ledger,
+                &String::from_str(&env, "event"),
+                &Vec::new(&env),
+                &Bytes::new(&env),
+            );
+        }
+
+        let events = client.get_events(&1u64, &MAX_PAGE);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events.get(0).unwrap().seq, 1u64);
     }
 
     // ── #4 — update_contract emits an event ──────────────────────────────────
