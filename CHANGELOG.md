@@ -301,6 +301,8 @@ The frontend CI was failing with 'npm ci can only install packages when
 
 - Address indexer issue checks ([`51a9735`](../../commit/51a9735f6018e370f7b8440eebe22e83b0c8f758))
 
+- Address issues 756-759 ([`77f3094`](../../commit/77f309477c5ff8fe9579c06e3a4e9b9806a7908e))
+
 - React keys, search query, and debounce in EventTable and Home ([`b3be6a2`](../../commit/b3be6a2cc8b51288676a183ef53944eafffeea16))
 
 - EventTable.tsx ([#303](../../issues/303)): wrap each event pair in <React.Fragment key={ev.seq}>
@@ -922,6 +924,8 @@ Issue [#118](../../issues/118) — Contract admin key management
 
 
 ### Documentation
+
+- Auto-update CHANGELOG.md [skip ci] ([`314822e`](../../commit/314822ec34b7f18d0ed99fc4fbda31490f2d4d35))
 
 - Auto-update CHANGELOG.md [skip ci] ([`5f131b9`](../../commit/5f131b91d28dd0a0af5d90b2fe467893d8334eca))
 
